@@ -87,10 +87,10 @@ namespace Sign.Cli
                 // SHA-1 Thumbprint is required in case the provided certificate container contains multiple certificates.
                 if (string.IsNullOrEmpty(sha1Thumbprint))
                 {
-                    context.Console.Error.WriteLine(
-                        FormatMessage(Resources.InvalidSha1ThumbprintValue, Sha1ThumbprintOption));
+                    context.Console.Error.WriteFormattedLine(
+                        Resources.InvalidSha1ThumbprintValue, 
+                        Sha1ThumbprintOption);
                     context.ExitCode = ExitCode.NoInputsFound;
-
                     return;
                 }
 
@@ -114,10 +114,9 @@ namespace Sign.Cli
                 // Make sure this is rooted
                 if (!Path.IsPathRooted(baseDirectory.FullName))
                 {
-                    context.Console.Error.WriteLine(
-                        FormatMessage(
+                    context.Console.Error.WriteFormattedLine(
                             AzureKeyVaultResources.InvalidBaseDirectoryValue,
-                            _codeCommand.BaseDirectoryOption));
+                            _codeCommand.BaseDirectoryOption);
                     context.ExitCode = ExitCode.InvalidOptions;
                     return;
                 }
@@ -152,7 +151,6 @@ namespace Sign.Cli
                     {
                         context.Console.Error.WriteLine(AzureKeyVaultResources.InvalidFileValue);
                         context.ExitCode = ExitCode.InvalidOptions;
-
                         return;
                     }
 
@@ -207,10 +205,9 @@ namespace Sign.Cli
 
                 if (inputFiles.Any(file => !file.Exists))
                 {
-                    context.Console.Error.WriteLine(
-                        FormatMessage(
+                    context.Console.Error.WriteFormattedLine(
                             AzureKeyVaultResources.SomeFilesDoNotExist,
-                            _codeCommand.BaseDirectoryOption));
+                            _codeCommand.BaseDirectoryOption);
 
                     foreach (FileInfo file in inputFiles.Where(file => !file.Exists))
                     {
@@ -247,15 +244,6 @@ namespace Sign.Cli
             }
 
             return Path.Combine(baseDirectory.FullName, file);
-        }
-
-        private static string FormatMessage(string format, params IdentifierSymbol[] symbols)
-        {
-            string[] formattedSymbols = symbols
-                .Select(symbol => $"--{symbol.Name}")
-                .ToArray();
-
-            return string.Format(CultureInfo.CurrentCulture, format, formattedSymbols);
         }
     }
 }
