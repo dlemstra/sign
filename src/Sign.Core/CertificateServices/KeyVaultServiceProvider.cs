@@ -6,7 +6,7 @@ using Azure.Core;
 
 namespace Sign.Core
 {
-    internal sealed class KeyVaultServiceProvider
+    internal sealed class KeyVaultServiceProvider : ICodeSigningServiceProvider
     {
         private readonly string _certificateName;
         private readonly Uri _keyVaultUrl;
@@ -33,14 +33,14 @@ namespace Sign.Core
             _certificateName = certificateName;
         }
 
-        internal ISignatureAlgorithmProvider GetSignatureAlgorithmProvider(IServiceProvider serviceProvider)
+        public ISignatureAlgorithmProvider GetSignatureAlgorithmProvider(IServiceProvider serviceProvider)
         {
             ArgumentNullException.ThrowIfNull(serviceProvider, nameof(serviceProvider));
 
             return GetService(serviceProvider);
         }
 
-        internal ICertificateProvider GetCertificateProvider(IServiceProvider serviceProvider)
+        public ICertificateProvider GetCertificateProvider(IServiceProvider serviceProvider)
         {
             ArgumentNullException.ThrowIfNull(serviceProvider, nameof(serviceProvider));
 

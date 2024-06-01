@@ -1,0 +1,198 @@
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE.txt file in the project root for more information.
+
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.CommandLine.IO;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileSystemGlobbing;
+using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
+using Microsoft.Extensions.Logging;
+using Sign.Core;
+
+namespace Sign.Cli
+{
+    internal sealed class CodeCommandHandler
+    {
+        private readonly CodeCommand _codeCommand;
+        private readonly IServiceProviderFactory _serviceProviderFactory;
+
+        public CodeCommandHandler(CodeCommand codeCommand, IServiceProviderFactory serviceProviderFactory)
+        {
+            ArgumentNullException.ThrowIfNull(codeCommand, nameof(codeCommand));
+            ArgumentNullException.ThrowIfNull(serviceProviderFactory, nameof(serviceProviderFactory));
+
+            _codeCommand = codeCommand;
+            _serviceProviderFactory = serviceProviderFactory;
+        }
+
+        public async Task Handle(InvocationContext context, ICodeSigningServiceProvider codeSigningServiceProvider)
+        {
+            DirectoryInfo baseDirectory = context.ParseResult.GetValueForOption(_codeCommand.BaseDirectoryOption)!;
+            string? applicationName = context.ParseResult.GetValueForOption(_codeCommand.ApplicationNameOption);
+            string? publisherName = context.ParseResult.GetValueForOption(_codeCommand.PublisherNameOption);
+            string? description = context.ParseResult.GetValueForOption(_codeCommand.DescriptionOption);
+            // This option is required.  If its value fails to parse we won't have reached here,
+            // and after successful parsing its value will never be null.
+            // Non-null is already guaranteed; the null-forgiving operator (!) just simplifies code.
+            Uri descriptionUrl = context.ParseResult.GetValueForOption(_codeCommand.DescriptionUrlOption)!;
+            string? fileListFilePath = context.ParseResult.GetValueForOption(_codeCommand.FileListOption);
+            HashAlgorithmName fileHashAlgorithmName = context.ParseResult.GetValueForOption(_codeCommand.FileDigestOption);
+            HashAlgorithmName timestampHashAlgorithmName = context.ParseResult.GetValueForOption(_codeCommand.TimestampDigestOption);
+            // This option is optional but has a default value.  If its value fails to parse we won't have
+            // reached here, and after successful parsing its value will never be null.
+            // Non-null is already guaranteed; the null-forgiving operator (!) just simplifies code.
+            Uri timestampUrl = context.ParseResult.GetValueForOption(_codeCommand.TimestampUrlOption)!;
+            LogLevel verbosity = context.ParseResult.GetValueForOption(_codeCommand.VerbosityOption);
+            string? output = context.ParseResult.GetValueForOption(_codeCommand.OutputOption);
+            int maxConcurrency = context.ParseResult.GetValueForOption(_codeCommand.MaxConcurrencyOption);
+
+            string? fileArgument = context.ParseResult.GetValueForArgument(_codeCommand.FileArgument);
+
+            if (string.IsNullOrEmpty(fileArgument))
+            {
+                context.Console.Error.WriteLine(AzureKeyVaultResources.MissingFileValue);
+                context.ExitCode = ExitCode.InvalidOptions;
+                return;
+            }
+
+            // this check exists as a courtesy to users who may have been signing .clickonce files via the old workaround.
+            // at some point we should remove this check, probably once we hit v1.0
+            if (fileArgument.EndsWith(".clickonce", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Console.Error.WriteLine(AzureKeyVaultResources.ClickOnceExtensionNotSupported);
+                context.ExitCode = ExitCode.InvalidOptions;
+                return;
+            }
+
+            // Make sure this is rooted
+            if (!Path.IsPathRooted(baseDirectory.FullName))
+            {
+                context.Console.Error.WriteFormattedLine(
+                    AzureKeyVaultResources.InvalidBaseDirectoryValue,
+                    _codeCommand.BaseDirectoryOption);
+                context.ExitCode = ExitCode.InvalidOptions;
+                return;
+            }
+
+            IServiceProvider serviceProvider = _serviceProviderFactory.Create(
+                verbosity,
+                addServices: (IServiceCollection services) =>
+                {
+                    services.AddSingleton<ISignatureAlgorithmProvider>(
+                        (IServiceProvider serviceProvider) => codeSigningServiceProvider.GetSignatureAlgorithmProvider(serviceProvider));
+                    services.AddSingleton<ICertificateProvider>(
+                        (IServiceProvider serviceProvider) => codeSigningServiceProvider.GetCertificateProvider(serviceProvider));
+                });
+
+            List<FileInfo> inputFiles;
+
+            // If we're going to glob, we can't be fully rooted currently (fix me later)
+
+            bool isGlob = fileArgument.Contains('*');
+
+            if (isGlob)
+            {
+                if (Path.IsPathRooted(fileArgument))
+                {
+                    context.Console.Error.WriteLine(AzureKeyVaultResources.InvalidFileValue);
+                    context.ExitCode = ExitCode.InvalidOptions;
+
+                    return;
+                }
+
+                IFileListReader fileListReader = serviceProvider.GetRequiredService<IFileListReader>();
+                IFileMatcher fileMatcher = serviceProvider.GetRequiredService<IFileMatcher>();
+
+                using (MemoryStream stream = new(Encoding.UTF8.GetBytes(fileArgument)))
+                using (StreamReader reader = new(stream))
+                {
+                    fileListReader.Read(reader, out Matcher? matcher, out Matcher? antiMatcher);
+
+                    DirectoryInfoBase directory = new DirectoryInfoWrapper(baseDirectory);
+
+                    IEnumerable<FileInfo> matches = fileMatcher.EnumerateMatches(directory, matcher);
+
+                    if (antiMatcher is not null)
+                    {
+                        IEnumerable<FileInfo> antiMatches = fileMatcher.EnumerateMatches(directory, antiMatcher);
+                        matches = matches.Except(antiMatches, FileInfoComparer.Instance);
+                    }
+
+                    inputFiles = matches.ToList();
+                }
+            }
+            else
+            {
+                inputFiles = new List<FileInfo>()
+                    {
+                        new FileInfo(ExpandFilePath(baseDirectory, fileArgument))
+                    };
+            }
+
+            FileInfo? fileList = null;
+            if (!string.IsNullOrEmpty(fileListFilePath))
+            {
+                if (Path.IsPathRooted(fileListFilePath))
+                {
+                    fileList = new FileInfo(fileListFilePath);
+                }
+                else
+                {
+                    fileList = new FileInfo(ExpandFilePath(baseDirectory, fileListFilePath));
+                }
+            }
+
+            if (inputFiles.Count == 0)
+            {
+                context.Console.Error.WriteLine(AzureKeyVaultResources.NoFilesToSign);
+                context.ExitCode = ExitCode.NoInputsFound;
+                return;
+            }
+
+            if (inputFiles.Any(file => !file.Exists))
+            {
+                context.Console.Error.WriteFormattedLine(
+                    AzureKeyVaultResources.SomeFilesDoNotExist,
+                    _codeCommand.BaseDirectoryOption);
+
+                foreach (FileInfo file in inputFiles.Where(file => !file.Exists))
+                {
+                    context.Console.Error.WriteLine($"    {file.FullName}");
+                }
+
+                context.ExitCode = ExitCode.NoInputsFound;
+                return;
+            }
+
+            ISigner signer = serviceProvider.GetRequiredService<ISigner>();
+
+            context.ExitCode = await signer.SignAsync(
+                inputFiles,
+                output,
+                fileList,
+                baseDirectory,
+                applicationName,
+                publisherName,
+                description,
+                descriptionUrl,
+                timestampUrl,
+                maxConcurrency,
+                fileHashAlgorithmName,
+                timestampHashAlgorithmName);
+        }
+
+        private static string ExpandFilePath(DirectoryInfo baseDirectory, string file)
+        {
+            if (Path.IsPathRooted(file))
+            {
+                return file;
+            }
+
+            return Path.Combine(baseDirectory.FullName, file);
+        }
+    }
+}
