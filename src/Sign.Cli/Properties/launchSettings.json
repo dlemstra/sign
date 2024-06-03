@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Sign.Cli": {
+      "commandName": "Project",
+      "commandLineArgs": "code trusted-signing --trusted-signing-tenant-id 74b708d7-bd8a-492e-ac34-adf346dc254d --trusted-signing-client-id 54a45c50-f846-4c1f-ba77-9bc5576866c0 --trusted-signing-client-secret \"rIF8Q~gwpppRwXhlQrQ2GP6jeEGocU--pSZGvdld\" --trusted-signing-endpoint https://eus.codesigning.azure.net/ --trusted-signing-account ImageMagick --trusted-signing-certificate-profile ImageMagick -d ImageMagick -u https://imagemagick.org -b D:/dlemstra *.nupkg"
+    }
+  }
+}

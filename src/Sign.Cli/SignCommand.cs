@@ -28,6 +28,12 @@ namespace Sign.Cli
                 serviceProviderFactory);
 
             codeCommand.AddCommand(certManagerCommand);
+
+            TrustedSigningCommand trustedSigningCommand = new(
+                codeCommand,
+                serviceProviderFactory);
+
+            codeCommand.AddCommand(trustedSigningCommand);
         }
     }
 }

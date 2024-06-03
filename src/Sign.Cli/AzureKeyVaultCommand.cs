@@ -42,11 +42,6 @@ namespace Sign.Cli
 
             this.SetHandler(async (InvocationContext context) =>
             {
-                Uri? url = context.ParseResult.GetValueForOption(UrlOption);
-                string? tenantId = context.ParseResult.GetValueForOption(TenantIdOption);
-                string? clientId = context.ParseResult.GetValueForOption(ClientIdOption);
-                string? secret = context.ParseResult.GetValueForOption(ClientSecretOption);
-                string? certificateId = context.ParseResult.GetValueForOption(CertificateOption);
                 bool useManagedIdentity = context.ParseResult.GetValueForOption(ManagedIdentityOption);
 
                 TokenCredential? credential = null;
@@ -55,23 +50,28 @@ namespace Sign.Cli
                 {
                     credential = new DefaultAzureCredential();
                 }
-                else
+
+                string? tenantId = context.ParseResult.GetValueForOption(TenantIdOption);
+                string? clientId = context.ParseResult.GetValueForOption(ClientIdOption);
+                string? clientSecret = context.ParseResult.GetValueForOption(ClientSecretOption);
+
+                if (string.IsNullOrEmpty(tenantId) ||
+                    string.IsNullOrEmpty(clientId) ||
+                    string.IsNullOrEmpty(clientSecret))
                 {
-                    if (string.IsNullOrEmpty(tenantId) ||
-                        string.IsNullOrEmpty(clientId) ||
-                        string.IsNullOrEmpty(secret))
-                    {
-                        context.Console.Error.WriteFormattedLine(
+                    context.Console.Error.WriteFormattedLine(
                                 AzureKeyVaultResources.InvalidClientSecretCredential,
                                 TenantIdOption,
                                 ClientIdOption,
                                 ClientSecretOption);
-                        context.ExitCode = ExitCode.NoInputsFound;
-                        return;
-                    }
-
-                    credential = new ClientSecretCredential(tenantId!, clientId!, secret!);
+                    context.ExitCode = ExitCode.NoInputsFound;
+                    return;
                 }
+
+                credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+
+                Uri? url = context.ParseResult.GetValueForOption(UrlOption);
+                string? certificateId = context.ParseResult.GetValueForOption(CertificateOption);
 
                 KeyVaultServiceProvider keyVaultServiceProvider = new(credential, url!, certificateId!);
 
